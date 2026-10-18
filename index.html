@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ドライブ記録</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* 左＝記録の一覧と集計、右＝地図。選んだ記録の詳細は地図の上に重ねる */
+:root{
+  --bg:#f3f5f4; --panel:#ffffff; --fg:#1d2a26; --sub:#5d6b66; --line:#d9e0dd;
+  --accent:#1f6f5c; --accent-weak:#e2efeb; --warn:#b4472b; --route:#d9432f;
+  --font:"BIZ UDPGothic","Meiryo UI","Yu Gothic UI",sans-serif;
+  --num:"Bahnschrift","Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:14px;display:flex;flex-direction:column}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:6px;padding:6px 10px}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:bold}
+button.danger{color:var(--warn)}
+input,textarea,select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+header{display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--accent);color:#fff;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;letter-spacing:.05em}
+header .sp{flex:1}
+header button{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.35);color:#fff}
+header button.primary{background:#fff;color:var(--accent);border-color:#fff}
+main{flex:1;display:flex;min-height:0}
+aside{width:380px;max-width:100%;display:flex;flex-direction:column;background:var(--panel);border-right:1px solid var(--line);min-height:0}
+#totals{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border-bottom:1px solid var(--line)}
+#totals div{background:var(--panel);padding:8px 10px}
+#totals small{display:block;color:var(--sub);font-size:11px;letter-spacing:.05em}
+#totals b{font-family:var(--num);font-size:20px;font-variant-numeric:tabular-nums}
+#totals span{font-size:11px;color:var(--sub);margin-left:2px}
+#tools{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+#q{flex:1;min-width:120px}
+#list{flex:1;overflow:auto}
+.month{position:sticky;top:0;background:var(--accent-weak);display:flex;justify-content:space-between;padding:4px 12px;font-size:12px;font-weight:bold;color:var(--accent);z-index:1}
+.trip{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.trip:hover{background:#f6faf9}
+.trip.sel{background:var(--accent-weak);box-shadow:inset 3px 0 var(--accent)}
+.trip .nm{font-weight:bold;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trip .km{font-family:var(--num);font-weight:bold;text-align:right;font-variant-numeric:tabular-nums}
+.trip .dt,.trip .tm{font-size:12px;color:var(--sub)}
+.trip .tm{text-align:right;font-variant-numeric:tabular-nums}
+#empty{padding:24px 16px;color:var(--sub);line-height:1.8}
+#empty ol{padding-left:20px;margin:8px 0}
+#mapwrap{flex:1;position:relative;min-width:0}
+#map{position:absolute;inset:0}
+#detail{position:absolute;top:10px;right:10px;z-index:500;width:330px;max-width:calc(100% - 20px);background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);max-height:calc(100% - 20px);overflow:auto}
+#detail .hd{display:flex;gap:6px;padding:10px 10px 6px}
+#dName{flex:1;font-weight:bold;min-width:0}
+#detail .stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border-block:1px solid var(--line)}
+#detail .stats div{background:var(--panel);padding:6px 10px}
+#detail .stats small{display:block;font-size:11px;color:var(--sub)}
+#detail .stats b{font-family:var(--num);font-size:17px;font-variant-numeric:tabular-nums}
+#detail .stats b span{font-size:11px;font-family:var(--font);font-weight:normal;color:var(--sub);margin-left:2px}
+#detail .places{padding:8px 10px;display:grid;grid-template-columns:auto 1fr;gap:4px 8px;font-size:13px}
+#detail .places i{font-style:normal;font-size:11px;color:#fff;border-radius:4px;padding:1px 5px;align-self:start}
+#detail textarea{width:calc(100% - 20px);margin:0 10px;min-height:48px;resize:vertical}
+#detail .ft{display:flex;gap:6px;padding:8px 10px 10px;flex-wrap:wrap}
+#legend{position:absolute;left:10px;bottom:24px;z-index:500;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:11px;display:flex;gap:8px;align-items:center}
+#legend i{display:inline-block;width:18px;height:4px;border-radius:2px;margin-right:3px;vertical-align:middle}
+#maptools{position:absolute;left:54px;top:10px;z-index:500;display:flex;gap:6px;flex-wrap:wrap}
+#maptools select,#maptools button{box-shadow:0 1px 4px rgba(0,0,0,.2)}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#1d2a26;color:#fff;padding:8px 14px;border-radius:6px;z-index:2100;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%}
+#toast.on{opacity:.95}
+#help{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;padding:16px}
+#help .box{background:var(--panel);border-radius:10px;max-width:640px;max-height:90%;overflow:auto;padding:18px 22px;line-height:1.8}
+#help h2{margin:0 0 6px;font-size:18px}
+#help h3{margin:14px 0 2px;font-size:15px;color:var(--accent)}
+.drop #mapwrap::after{content:"ここに GPX ファイルを落とすと読み込みます";position:absolute;inset:10px;border:3px dashed var(--accent);border-radius:12px;background:rgba(31,111,92,.12);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:bold;color:var(--accent);z-index:800}
+#dSum{display:none;padding:0 10px 8px;font-size:13px;color:var(--sub)}
+#detail.mini .stats,#detail.mini .places,#detail.mini textarea,#detail.mini .ft{display:none}
+#detail.mini #dSum{display:block}
+/* iPhoneなど幅の狭い画面：上に一覧、下に地図。詳細は地図の下側に畳んで出す */
+@media (max-width:760px){
+  header{padding:6px max(10px, env(safe-area-inset-left, 0px)) 6px;gap:6px}
+  header h1{font-size:16px;width:100%}
+  header .sp{display:none}
+  header button{padding:5px 8px;font-size:13px}
+  main{flex-direction:column}
+  aside{width:100%;height:38%;border-right:0;border-bottom:1px solid var(--line)}
+  #totals b{font-size:17px}
+  #detail{top:auto;bottom:10px;left:10px;right:10px;width:auto;max-height:60%}
+  #legend{bottom:84px;flex-wrap:wrap;right:10px}
+  #maptools{top:10px;left:54px;right:10px}
+  input,select,textarea{font-size:16px}   /* iPhoneで入力時に勝手に拡大されないように */
+}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>ドライブ記録</h1>
+  <span class="sp"></span>
+  <button class="primary" id="btnFiles">GPXを読み込む</button>
+  <button id="btnFolder" title="iPhoneから送ったGPXが入るフォルダを一度選ぶと、次からは押すだけで新しい記録だけ読み込みます">フォルダから新しい記録を読み込む</button>
+  <button id="btnBackup">バックアップを保存</button>
+  <button id="btnRestore">バックアップから戻す</button>
+  <button id="btnHelp">使い方</button>
+  <!-- iPhoneは .gpx を種類で絞ると選べなくなることがあるので accept は付けない（読み込み時に拡張子で確認） -->
+  <input type="file" id="fileIn" multiple hidden>
+  <input type="file" id="restoreIn" accept=".json" hidden>
+</header>
+<main>
+  <aside>
+    <div id="totals">
+      <div><small id="tMonthLbl">今月</small><b id="tMonth">0</b><span>km</span></div>
+      <div><small id="tYearLbl">今年</small><b id="tYear">0</b><span>km</span></div>
+      <div><small>記録の数</small><b id="tCount">0</b><span>件</span></div>
+    </div>
+    <div id="tools">
+      <input id="q" type="search" placeholder="名前・場所・メモで探す">
+      <select id="yearSel" title="表示する年"></select>
+    </div>
+    <div id="list"></div>
+  </aside>
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div id="maptools">
+      <select id="baseSel" title="地図の種類">
+        <option value="std">地理院地図</option>
+        <option value="pale">淡色地図</option>
+        <option value="photo">航空写真</option>
+        <option value="osm">OpenStreetMap</option>
+      </select>
+      <button id="btnAll" title="表示中の年の道をすべて重ねて表示">全部の道を表示</button>
+      <label style="background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px;box-shadow:0 1px 4px rgba(0,0,0,.2)"><input type="checkbox" id="spdColor" checked> 速度で色分け</label>
+    </div>
+    <div id="legend" hidden></div>
+    <div id="detail" hidden>
+      <div class="hd">
+        <input id="dName" type="text" title="記録の名前（書き換えられます）">
+        <button id="dMini" title="詳細をたたむ／ひらく">▼</button>
+        <button id="dClose" title="閉じる">×</button>
+      </div>
+      <div id="dSum"></div>
+      <div class="stats">
+        <div><small>走行距離</small><b id="dDist">-</b></div>
+        <div><small>かかった時間</small><b id="dDur">-</b></div>
+        <div><small>走っていた時間</small><b id="dMove">-</b></div>
+        <div><small>止まっていた時間</small><b id="dStop">-</b></div>
+        <div><small>平均速度（走行中）</small><b id="dAvg">-</b></div>
+        <div><small>最高速度</small><b id="dMax">-</b></div>
+      </div>
+      <div class="places">
+        <i style="background:#2e8b57">出発</i><div><span id="dStartT"></span><br><span id="dStartA"></span></div>
+        <i style="background:var(--route)">到着</i><div><span id="dEndT"></span><br><span id="dEndA"></span></div>
+      </div>
+      <textarea id="dMemo" placeholder="メモ（行き先・同乗者・立ち寄った所など）"></textarea>
+      <div class="ft">
+        <button id="dFit">この道に合わせる</button>
+        <button id="dGmap" title="出発地と到着地をGoogleマップで開く">Googleマップで開く</button>
+        <span style="flex:1"></span>
+        <button class="danger" id="dDel">削除</button>
+      </div>
+    </div>
+  </div>
+</main>
+<div id="toast"></div>
+<div id="help" hidden>
+  <div class="box">
+    <h2>使い方</h2>
+    <h3>1. iPhoneで記録する</h3>
+    GPSの記録アプリ（例：myTracks など、GPXファイルで書き出せるもの）で、出発時に記録を開始、着いたら停止します。記録中は画面を消してもかまいません。
+    <h3>2. 記録ファイル（GPX）をPCへ送る</h3>
+    記録アプリの「書き出し／共有」で GPX を選び、「ファイルに保存」→ Googleドライブ の「マイドライブ ＞ ドライブ記録」フォルダに保存します（iPhoneにGoogleドライブのアプリが必要です）。PCでは L:\マイドライブ\ドライブ記録 に届きます。メールで自分に送ってもかまいません。
+    <h3>3. このアプリに読み込む</h3>
+    ［GPXを読み込む］でファイルを選ぶか、地図の上にファイルを落とします。<br>
+    iPhoneでは［GPXを読み込む］→［ブラウズ］→［Googleドライブ］→［マイドライブ］→［ドライブ記録］の順に開いてファイルを選びます。<br>
+    ［フォルダから新しい記録を読み込む］は、L:\マイドライブ\ドライブ記録 を一度選んでおくと、次からは押すだけでまだ読み込んでいない記録だけを読み込みます（Edge・Chromeで使えます。Braveでは使えないことがあります）。<br>
+    同じ記録を2回読み込んでも、二重には登録されません。
+    <h3>4. 見る</h3>
+    左の一覧から選ぶと、地図に道のりが出ます。名前やメモは書き換えられます。［全部の道を表示］で、その年に走った道をまとめて見られます。
+    <h3>記録の保存場所について</h3>
+    記録は、開いている機械（PC・iPhone）のブラウザの中に保存されます。PCとiPhoneの記録は自動ではつながりません。ブラウザの閲覧データを消すと記録も消えるので、ときどき［バックアップを保存］でファイルに残してください。別の機械やブラウザへは［バックアップから戻す］で移せます。
+    <p style="text-align:right;margin:12px 0 0"><button class="primary" id="helpClose">閉じる</button></p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+'use strict';
+const el = id => document.getElementById(id);
+function toast(msg, ms){ const t = el('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(()=>t.classList.remove('on'), ms||3000); }
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ===== 保存（IndexedDB） =====
+const DB_NAME = 'drive-log', DB_VER = 1;
+let dbp = null;
+function db(){
+  if(!dbp) dbp = new Promise((res, rej)=>{
+    const r = indexedDB.open(DB_NAME, DB_VER);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      if(!d.objectStoreNames.contains('trips')) d.createObjectStore('trips', {keyPath:'id'});
+      if(!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return dbp;
+}
+async function tx(store, mode, fn){
+  const d = await db();
+  return new Promise((res, rej)=>{
+    const t = d.transaction(store, mode), s = t.objectStore(store);
+    let out; const r = fn(s);
+    if(r && 'onsuccess' in r) r.onsuccess = () => { out = r.result; };
+    t.oncomplete = () => res(out);
+    t.onerror = t.onabort = () => rej(t.error);
+  });
+}
+const putTrip = t => tx('trips', 'readwrite', s => s.put(t));
+const delTrip = id => tx('trips', 'readwrite', s => s.delete(id));
+const allTrips = () => tx('trips', 'readonly', s => s.getAll());
+const kvGet = k => tx('kv', 'readonly', s => s.get(k));
+const kvSet = (k, v) => tx('kv', 'readwrite', s => s.put(v, k));
+
+// ===== GPX の読み取りと計算 =====
+function parseGPX(text){
+  const xml = new DOMParser().parseFromString(text, 'application/xml');
+  if(xml.getElementsByTagName('parsererror').length) throw new Error('GPXファイルとして読めませんでした');
+  let nodes = [...xml.getElementsByTagName('trkpt')];
+  if(!nodes.length) nodes = [...xml.getElementsByTagName('rtept')];
+  if(!nodes.length) throw new Error('道のりの点（trkpt）が入っていません');
+  const pts = [];
+  for(const n of nodes){
+    const lat = parseFloat(n.getAttribute('lat')), lon = parseFloat(n.getAttribute('lon'));
+    if(!isFinite(lat) || !isFinite(lon)) continue;
+    const te = n.getElementsByTagName('time')[0], ee = n.getElementsByTagName('ele')[0];
+    const t = te ? Date.parse(te.textContent.trim()) : NaN;
+    pts.push([+lat.toFixed(6), +lon.toFixed(6), isFinite(t) ? t : null, ee ? Math.round(parseFloat(ee.textContent)) : null]);
+  }
+  if(pts.length < 2) throw new Error('点が少なすぎて道のりになりません');
+  if(pts.every(p => p[2] != null)) pts.sort((a, b) => a[2] - b[2]);
+  const nmEl = xml.querySelector('trk > name') || xml.querySelector('metadata > name');
+  return {pts, gpxName: nmEl ? nmEl.textContent.trim() : ''};
+}
+function hav(a, b){
+  const R = 6371008.8, r = Math.PI/180;
+  const dLa = (b[0]-a[0])*r, dLo = (b[1]-a[1])*r;
+  const h = Math.sin(dLa/2)**2 + Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLo/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+// 停車中のGPSのふらつきを距離に足さないよう、前に数えた点から8m以上離れたときだけ足す。
+// 時速250kmを超える飛び（GPSの誤り）は捨てる。
+function analyze(pts){
+  const ANCHOR = 8, JUMP = 250;
+  let dist = 0, moving = 0, anchor = pts[0], maxSpd = 0;
+  const cum = [0], seg = [];            // seg[i]: 点i-1→iの速度(km/h)、色分け用
+  for(let i = 1; i < pts.length; i++){
+    const p = pts[i], q = pts[i-1];
+    const dt = (p[2] != null && q[2] != null) ? (p[2]-q[2])/1000 : null;
+    const dq = hav(q, p);
+    const v = dt > 0 ? dq/dt*3.6 : null;
+    seg[i] = v;
+    if(v != null && v > JUMP){ cum[i] = cum[i-1]; seg[i] = null; continue; }
+    const da = hav(anchor, p);
+    if(da >= ANCHOR){ dist += da; anchor = p; }
+    cum[i] = dist;
+    if(dt > 0 && dt < 300 && v >= 4) moving += dt;
+  }
+  // 最高速度：10秒以上の区間でならした速度の最大
+  if(pts[0][2] != null){
+    let j = 0;
+    for(let i = 1; i < pts.length; i++){
+      if(pts[i][2] == null) continue;
+      while(j < i && pts[i][2] - pts[j+1][2] >= 10000) j++;
+      const dt = (pts[i][2] - pts[j][2])/1000;
+      if(dt >= 10 && dt <= 120){
+        const v = (cum[i]-cum[j])/dt*3.6;
+        if(v > maxSpd && v < 200) maxSpd = v;
+      }
+    }
+  }
+  const t0 = pts[0][2], t1 = pts[pts.length-1][2];
+  return {dist, moving: Math.round(moving), maxSpd: Math.round(maxSpd), start: t0, end: t1, seg};
+}
+
+// ===== 住所（国土地理院の逆ジオコーダ） =====
+let muniReady = null;
+function loadMuni(){
+  if(!muniReady) muniReady = new Promise((res, rej)=>{
+    window.GSI = window.GSI || {};
+    const s = document.createElement('script');
+    s.src = 'https://maps.gsi.go.jp/js/muni.js'; s.charset = 'UTF-8';
+    s.onload = res; s.onerror = () => { muniReady = null; rej(); };
+    document.head.appendChild(s);
+  });
+  return muniReady;
+}
+async function addressOf(p){
+  try{
+    const [js] = await Promise.all([
+      fetch('https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress?lat='+p[0]+'&lon='+p[1]).then(r => r.json()),
+      loadMuni()
+    ]);
+    const cd = js.results && js.results.muniCd;
+    if(!cd) return '';
+    const m = (GSI.MUNI_ARRAY[String(parseInt(cd, 10))] || '').split(',');
+    const town = js.results.lv01Nm && js.results.lv01Nm !== '－' ? js.results.lv01Nm : '';
+    return ((m[1]||'') + (m[3]||'') + town).replace(/[\s　]/g, '');
+  }catch(e){ return ''; }
+}
+const shortPlace = a => a.replace(/^(北海道|東京都|大阪府|京都府|.{2,3}県)/, '');
+
+// ===== 表示用の書式 =====
+const pad = n => String(n).padStart(2, '0');
+const WD = '日月火水木金土';
+function fmtDate(t){ const d = new Date(t); return (d.getMonth()+1)+'月'+d.getDate()+'日('+WD[d.getDay()]+')'; }
+function fmtTime(t){ const d = new Date(t); return d.getHours()+':'+pad(d.getMinutes()); }
+function fmtDur(s){ if(s == null || !isFinite(s)) return '-'; s = Math.round(s/60); return s >= 60 ? Math.floor(s/60)+'時間'+pad(s%60)+'分' : s+'分'; }
+const km = m => (m/1000).toFixed(m < 100000 ? 1 : 0);
+
+// ===== 記録の追加 =====
+let trips = [];
+async function importText(fileName, text){
+  const {pts, gpxName} = parseGPX(text);
+  const a = analyze(pts);
+  const id = (a.start != null ? 't'+a.start : 'f'+fileName) + '_' + pts.length;
+  if(trips.some(t => t.id === id)) return {dup: true};
+  const trip = {
+    id, file: fileName, pts, dist: a.dist, moving: a.moving, maxSpd: a.maxSpd,
+    start: a.start, end: a.end, startAddr: '', endAddr: '', memo: '', added: Date.now(),
+    name: gpxName && !/^\d{4}[-\/]/.test(gpxName) ? gpxName : ''
+  };
+  const [sa, ea] = await Promise.all([addressOf(pts[0]), addressOf(pts[pts.length-1])]);
+  trip.startAddr = sa; trip.endAddr = ea;
+  if(!trip.name) trip.name = (sa || ea) ? shortPlace(sa || '?') + ' → ' + shortPlace(ea || '?') : fileName.replace(/\.gpx$/i, '');
+  await putTrip(trip);
+  trips.push(trip);
+  return {trip};
+}
+async function importFiles(files){
+  let ok = 0, dup = 0, ng = [], last = null;
+  for(const f of files){
+    if(!/\.gpx$/i.test(f.name)){ ng.push(f.name+'（GPXではありません）'); continue; }
+    try{
+      toast(f.name+' を読み込んでいます…', 10000);
+      const r = await importText(f.name, await f.text());
+      if(r.dup) dup++; else { ok++; last = r.trip; }
+    }catch(e){ ng.push(f.name+'（'+e.message+'）'); }
+  }
+  render();
+  if(last) select(last.id, true);
+  let msg = ok+'件の記録を読み込みました。';
+  if(dup) msg += '（'+dup+'件は読み込み済み）';
+  if(ng.length) msg += '\n読めなかったファイル：' + ng.join('、');
+  toast(msg, ng.length ? 8000 : 4000);
+  return {ok, dup, ng};
+}
+window.__importText = importText;   // 試験用
+
+// ===== フォルダから読み込む（File System Access API） =====
+async function importFolder(){
+  if(!window.showDirectoryPicker){
+    alert('このブラウザではフォルダの読み込みが使えません。\nEdge か Chrome で開くか、［GPXを読み込む］でファイルを選んでください。');
+    return;
+  }
+  let dir = null;
+  try{ dir = await kvGet('dir'); }catch(e){}
+  try{
+    if(dir){
+      let p = await dir.queryPermission({mode:'read'});
+      if(p !== 'granted') p = await dir.requestPermission({mode:'read'});
+      if(p !== 'granted') dir = null;
+    }
+    if(!dir){
+      dir = await window.showDirectoryPicker({id:'drive-log', mode:'read'});
+      await kvSet('dir', dir);
+    }
+  }catch(e){ if(e.name !== 'AbortError') toast('フォルダを開けませんでした：'+e.message, 6000); return; }
+  const files = [];
+  const seen = new Set(trips.map(t => t.file));
+  for await (const [name, h] of dir.entries()){
+    if(h.kind === 'file' && /\.gpx$/i.test(name) && !seen.has(name)) files.push(await h.getFile());
+  }
+  if(!files.length){ toast('「'+dir.name+'」に新しい記録はありませんでした'); return; }
+  importFiles(files);
+}
+
+// ===== バックアップ =====
+function backup(){
+  const blob = new Blob([JSON.stringify({app:'drive-log', ver:1, saved:new Date().toISOString(), trips})], {type:'application/json'});
+  const a = document.createElement('a');
+  const d = new Date();
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ドライブ記録_バックアップ_'+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+async function restore(file){
+  try{
+    const js = JSON.parse(await file.text());
+    if(js.app !== 'drive-log' || !Array.isArray(js.trips)) throw new Error('このアプリのバックアップではありません');
+    let n = 0;
+    for(const t of js.trips){
+      if(!t || !t.id || !Array.isArray(t.pts) || trips.some(x => x.id === t.id)) continue;
+      await putTrip(t); trips.push(t); n++;
+    }
+    render();
+    toast(n+'件の記録を戻しました（すでにある記録はそのまま）', 5000);
+  }catch(e){ toast('戻せませんでした：'+e.message, 6000); }
+}
+
+// ===== 地図 =====
+const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>';
+const BASES = {
+  std:  L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {maxZoom:18, attribution:GSI_ATTR}),
+  pale: L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {maxZoom:18, attribution:GSI_ATTR}),
+  photo:L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {maxZoom:18, attribution:GSI_ATTR}),
+  osm:  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'})
+};
+const map = L.map('map', {zoomControl:true, preferCanvas:true}).setView([36.06, 139.67], 10);
+let base = 'std';
+try{ base = localStorage.getItem('drive-log-base') || 'std'; }catch(e){}
+if(!BASES[base]) base = 'std';
+BASES[base].addTo(map);
+el('baseSel').value = base;
+el('baseSel').onchange = e => {
+  map.removeLayer(BASES[base]); base = e.target.value; BASES[base].addTo(map);
+  try{ localStorage.setItem('drive-log-base', base); }catch(e){}
+};
+try{ el('spdColor').checked = localStorage.getItem('drive-log-spd') !== '0'; }catch(e){}
+
+const SPEED = [ // 速度(km/h)の上限と色
+  [20, '#3b6fb6', '〜20'], [40, '#2a9d8f', '〜40'], [60, '#e9b500', '〜60'], [80, '#f07f13', '〜80'], [Infinity, '#d62828', '80〜']
+];
+const spdColor = v => v == null ? '#888' : SPEED.find(s => v < s[0])[1];
+let layer = L.layerGroup().addTo(map);
+let selId = null, showAll = false;
+
+function drawTrip(t, fit){
+  layer.clearLayers();
+  const ll = t.pts.map(p => [p[0], p[1]]);
+  const useSpd = el('spdColor').checked && t.pts[0][2] != null;
+  L.polyline(ll, {color:'#fff', weight:8, opacity:.9}).addTo(layer);
+  if(useSpd){
+    const {seg} = analyze(t.pts);
+    // 点ごとの速度を前後でならしてから、同じ色が続く所をまとめて1本の線にする
+    const sm = seg.map((v, i) => {
+      let s = 0, n = 0;
+      for(let k = Math.max(1, i-3); k <= Math.min(seg.length-1, i+3); k++) if(seg[k] != null){ s += seg[k]; n++; }
+      return n ? s/n : null;
+    });
+    let cur = null, run = [ll[0]];
+    for(let i = 1; i < ll.length; i++){
+      const c = spdColor(sm[i]);
+      if(cur && c !== cur){ L.polyline(run, {color:cur, weight:5}).addTo(layer); run = [ll[i-1]]; }
+      cur = c; run.push(ll[i]);
+    }
+    if(run.length > 1) L.polyline(run, {color:cur, weight:5}).addTo(layer);
+    el('legend').innerHTML = '<b>速度</b>' + SPEED.map(s => '<span><i style="background:'+s[1]+'"></i>'+s[2]+'</span>').join('') + '<span style="color:var(--sub)">km/h</span>';
+    el('legend').hidden = false;
+  }else{
+    L.polyline(ll, {color:getComputedStyle(document.documentElement).getPropertyValue('--route').trim(), weight:5}).addTo(layer);
+    el('legend').hidden = true;
+  }
+  const mk = (p, color, label) => L.circleMarker([p[0], p[1]], {radius:8, color:'#fff', weight:3, fillColor:color, fillOpacity:1})
+    .bindTooltip(label, {permanent:false}).addTo(layer);
+  mk(t.pts[0], '#2e8b57', '出発 '+(t.start ? fmtTime(t.start) : ''));
+  mk(t.pts[t.pts.length-1], '#d9432f', '到着 '+(t.end ? fmtTime(t.end) : ''));
+  if(fit){   // 右の詳細パネルに道が隠れないよう、その分だけ右に余白をとる
+    const br = isPhone() ? [30, 110] : [360, 40];   // スマホは下に詳細が出る
+    map.fitBounds(L.latLngBounds(ll), {paddingTopLeft:[30, 50], paddingBottomRight:br, maxZoom:16});
+  }
+}
+function drawAll(){
+  layer.clearLayers(); el('legend').hidden = true;
+  const list = visibleTrips();
+  if(!list.length){ toast('表示できる記録がありません'); return; }
+  const b = L.latLngBounds([]);
+  for(const t of list){
+    const step = Math.max(1, Math.floor(t.pts.length/800));
+    const ll = t.pts.filter((p, i) => i % step === 0 || i === t.pts.length-1).map(p => [p[0], p[1]]);
+    L.polyline(ll, {color:'#d9432f', weight:3, opacity:.55}).bindTooltip(t.name).on('click', () => select(t.id, true)).addTo(layer);
+    ll.forEach(x => b.extend(x));
+  }
+  map.fitBounds(b, {padding:[30, 30]});
+  toast(list.length+'件の道を重ねて表示しています');
+}
+
+// ===== 一覧と詳細 =====
+function tripTime(t){ return t.start != null ? t.start : t.added; }
+function visibleTrips(){
+  const y = el('yearSel').value, q = el('q').value.trim().toLowerCase();
+  return trips.filter(t => (y === 'all' || new Date(tripTime(t)).getFullYear() == y) &&
+    (!q || (t.name+' '+t.startAddr+' '+t.endAddr+' '+t.memo+' '+t.file).toLowerCase().includes(q)))
+    .sort((a, b) => tripTime(b) - tripTime(a));
+}
+function render(){
+  // 年の選択肢
+  const years = [...new Set(trips.map(t => new Date(tripTime(t)).getFullYear()))].sort((a, b) => b - a);
+  const ys = el('yearSel'), keep = ys.value;
+  ys.innerHTML = '<option value="all">すべての年</option>' + years.map(y => '<option value="'+y+'">'+y+'年</option>').join('');
+  ys.value = keep && [...ys.options].some(o => o.value === keep) ? keep : (years.length ? String(years[0]) : 'all');
+  // 集計
+  const now = new Date();
+  const sum = f => trips.filter(f).reduce((s, t) => s + t.dist, 0);
+  el('tMonth').textContent = km(sum(t => { const d = new Date(tripTime(t)); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); }));
+  el('tYear').textContent = km(sum(t => new Date(tripTime(t)).getFullYear() === now.getFullYear()));
+  el('tMonthLbl').textContent = (now.getMonth()+1)+'月';
+  el('tYearLbl').textContent = now.getFullYear()+'年';
+  el('tCount').textContent = trips.length;
+  // 一覧（月ごと）
+  const list = visibleTrips(), box = el('list');
+  if(!trips.length){
+    box.innerHTML = '<div id="empty"><b>まだ記録がありません。</b><ol><li>iPhoneの記録アプリでドライブを記録</li><li>GPXファイルで書き出してPCへ送る</li><li>上の［GPXを読み込む］か、地図の上にファイルを落とす</li></ol>くわしくは［使い方］をご覧ください。</div>';
+    return;
+  }
+  if(!list.length){ box.innerHTML = '<div id="empty">条件に合う記録がありません。</div>'; return; }
+  let html = '', curM = '';
+  const mTotals = {};
+  list.forEach(t => { const d = new Date(tripTime(t)); const k = d.getFullYear()+'-'+d.getMonth(); mTotals[k] = (mTotals[k]||0) + t.dist; });
+  for(const t of list){
+    const d = new Date(tripTime(t)), k = d.getFullYear()+'-'+d.getMonth();
+    if(k !== curM){ curM = k; html += '<div class="month"><span>'+d.getFullYear()+'年'+(d.getMonth()+1)+'月</span><span>'+km(mTotals[k])+' km</span></div>'; }
+    html += '<div class="trip'+(t.id === selId ? ' sel' : '')+'" data-id="'+esc(t.id)+'">' +
+      '<div class="nm">'+esc(t.name)+'</div><div class="km">'+km(t.dist)+' km</div>' +
+      '<div class="dt">'+(t.start != null ? fmtDate(t.start)+' '+fmtTime(t.start)+'〜'+fmtTime(t.end) : esc(t.file))+'</div>' +
+      '<div class="tm">'+(t.start != null ? fmtDur((t.end - t.start)/1000) : '')+'</div></div>';
+  }
+  box.innerHTML = html;
+}
+el('list').addEventListener('click', e => { const r = e.target.closest('.trip'); if(r) select(r.dataset.id, true); });
+
+function select(id, fit){
+  const t = trips.find(x => x.id === id);
+  if(!t){ selId = null; el('detail').hidden = true; return; }
+  selId = id; showAll = false;
+  document.querySelectorAll('.trip').forEach(r => r.classList.toggle('sel', r.dataset.id === id));
+  drawTrip(t, fit);
+  el('detail').hidden = false;
+  el('dName').value = t.name;
+  el('dMemo').value = t.memo || '';
+  const dur = t.start != null ? (t.end - t.start)/1000 : null;
+  const u = (v, unit) => v + '<span>'+unit+'</span>';
+  el('dDist').innerHTML = u(km(t.dist), 'km');
+  el('dDur').textContent = fmtDur(dur);
+  el('dMove').textContent = t.start != null ? fmtDur(t.moving) : '-';
+  el('dStop').textContent = t.start != null ? fmtDur(Math.max(0, dur - t.moving)) : '-';
+  el('dAvg').innerHTML = t.moving > 0 ? u((t.dist/1000/(t.moving/3600)).toFixed(0), 'km/h') : '-';
+  el('dMax').innerHTML = t.maxSpd > 0 ? u(t.maxSpd, 'km/h') : '-';
+  el('dStartT').textContent = t.start != null ? fmtDate(t.start)+' '+fmtTime(t.start) : '';
+  el('dEndT').textContent = t.end != null ? fmtDate(t.end)+' '+fmtTime(t.end) : '';
+  el('dStartA').textContent = t.startAddr || '（住所不明）';
+  el('dEndA').textContent = t.endAddr || '（住所不明）';
+  el('dSum').textContent = km(t.dist)+' km　' + (t.start != null ? fmtDate(t.start)+' '+fmtTime(t.start)+'〜'+fmtTime(t.end)+'（'+fmtDur(dur)+'）' : '');
+  setMini(isPhone());
+}
+const isPhone = () => window.matchMedia('(max-width:760px)').matches;
+function setMini(on){ el('detail').classList.toggle('mini', on); el('dMini').textContent = on ? '▲' : '▼'; }
+el('dMini').onclick = () => setMini(!el('detail').classList.contains('mini'));
+function cur(){ return trips.find(x => x.id === selId); }
+el('dName').addEventListener('change', async () => { const t = cur(); if(!t) return; t.name = el('dName').value.trim() || t.name; await putTrip(t); render(); });
+el('dMemo').addEventListener('change', async () => { const t = cur(); if(!t) return; t.memo = el('dMemo').value; await putTrip(t); });
+el('dClose').onclick = () => { selId = null; el('detail').hidden = true; layer.clearLayers(); el('legend').hidden = true; render(); };
+el('dFit').onclick = () => { const t = cur(); if(t) drawTrip(t, true); };
+el('dGmap').onclick = () => {
+  const t = cur(); if(!t) return;
+  const a = t.pts[0], b = t.pts[t.pts.length-1];
+  window.open('https://www.google.com/maps/dir/?api=1&origin='+a[0]+','+a[1]+'&destination='+b[0]+','+b[1]+'&travelmode=driving', '_blank');
+};
+el('dDel').onclick = async () => {
+  const t = cur(); if(!t) return;
+  if(!confirm('「'+t.name+'」を削除します。よろしいですか？\n（バックアップに残っていれば戻せます）')) return;
+  await delTrip(t.id); trips = trips.filter(x => x.id !== t.id);
+  selId = null; el('detail').hidden = true; layer.clearLayers(); el('legend').hidden = true; render();
+  toast('削除しました');
+};
+el('spdColor').onchange = () => { try{ localStorage.setItem('drive-log-spd', el('spdColor').checked ? '1' : '0'); }catch(e){} const t = cur(); if(t) drawTrip(t, false); };
+el('btnAll').onclick = () => { selId = null; el('detail').hidden = true; render(); drawAll(); };
+el('q').oninput = render;
+el('yearSel').onchange = render;
+
+// ===== ボタン・ドラッグ =====
+el('btnFiles').onclick = () => el('fileIn').click();
+el('fileIn').onchange = e => { if(e.target.files.length) importFiles([...e.target.files]); e.target.value = ''; };
+el('btnFolder').onclick = importFolder;
+if(!window.showDirectoryPicker) el('btnFolder').hidden = true;   // iPhone・Brave・Firefoxでは使えないので出さない
+el('btnBackup').onclick = () => { if(!trips.length) return toast('まだ記録がありません'); backup(); };
+el('btnRestore').onclick = () => el('restoreIn').click();
+el('restoreIn').onchange = e => { if(e.target.files[0]) restore(e.target.files[0]); e.target.value = ''; };
+el('btnHelp').onclick = () => el('help').hidden = false;
+el('helpClose').onclick = () => el('help').hidden = true;
+el('help').onclick = e => { if(e.target.id === 'help') el('help').hidden = true; };
+let dragN = 0;
+document.addEventListener('dragenter', e => { if([...e.dataTransfer.types].includes('Files')){ dragN++; document.body.classList.add('drop'); } });
+document.addEventListener('dragleave', () => { if(--dragN <= 0){ dragN = 0; document.body.classList.remove('drop'); } });
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault(); dragN = 0; document.body.classList.remove('drop');
+  const fs = [...e.dataTransfer.files]; if(fs.length) importFiles(fs);
+});
+
+// ===== 起動 =====
+(async () => {
+  try{ trips = await allTrips(); }catch(e){ toast('記録を読み出せませんでした：'+e.message, 8000); }
+  render();
+  const list = visibleTrips();
+  if(list.length) select(list[0].id, true);
+  else{ try{ if(!localStorage.getItem('drive-log-helped')){ el('help').hidden = false; localStorage.setItem('drive-log-helped', '1'); } }catch(e){} }
+})();
+</script>
+</body>
+</html>
